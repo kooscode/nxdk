@@ -131,6 +131,16 @@
 #define MEMP_MEM_MALLOC                 1
 
 /**
+ * MEMP_NUM_NETCONN: the number of struct netconns. They come from the heap
+ * (MEMP_MEM_MALLOC), but the socket API also sizes its socket table
+ * (NUM_SOCKETS) and select()'s limit (FD_SETSIZE) by this. lwIP's default
+ * of 4 leaves a listening server room for one client and nothing more: an FTP
+ * server's data connection already fails to be accepted while a second
+ * client is connected.
+ */
+#define MEMP_NUM_NETCONN                32
+
+/**
  * MEM_ALIGNMENT: should be set to the alignment of the CPU
  *    4 byte alignment -> #define MEM_ALIGNMENT 4
  *    2 byte alignment -> #define MEM_ALIGNMENT 2
