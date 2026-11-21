@@ -48,6 +48,11 @@ NXDK_ASFLAGS += -g -gdwarf-4
 NXDK_CFLAGS += -g -gdwarf-4
 NXDK_CXXFLAGS += -g -gdwarf-4
 NXDK_LDFLAGS += -debug
+else
+# Optimized by default; an app's own CFLAGS/CXXFLAGS come after these, so
+# an -O level there still wins.
+NXDK_CFLAGS += -O2
+NXDK_CXXFLAGS += -O2
 endif
 
 ifeq ($(LTO),y)
