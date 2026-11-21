@@ -18,8 +18,8 @@
 	branch = nxdk
 [submodule "lib/pdclib"]
 	path = lib/pdclib
-	url = https://github.com/XboxDev/nxdk-pdclib.git
-	branch = nxdk
+	url = https://github.com/kooscode/nxdk-pdclib.git
+	branch = oxos
 [submodule "lib/libcxx"]
 	path = lib/libcxx
 	url = https://github.com/XboxDev/nxdk-libcxx.git
