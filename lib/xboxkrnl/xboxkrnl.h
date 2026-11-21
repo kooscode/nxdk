@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: CC0-1.0
 
-// SPDX-FileCopyrightText: 2017-2023 Stefan Schmidt
+// SPDX-FileCopyrightText: 2017-2026 Stefan Schmidt
 // SPDX-FileCopyrightText: 2018-2021 Jannik Vogel
 // SPDX-FileCopyrightText: 2018 Sean Koppenhafer
 // SPDX-FileCopyrightText: 2022-2025 Erik Abair
@@ -71,6 +71,8 @@ typedef UCHAR KIRQL, *PKIRQL;
 #define PASSIVE_LEVEL 0
 #define APC_LEVEL 1
 #define DISPATCH_LEVEL 2
+#define PROFILE_LEVEL 27
+#define HIGH_LEVEL 31
 
 typedef ULONG PFN_COUNT;
 typedef ULONG PFN_NUMBER, *PPFN_NUMBER;
@@ -719,6 +721,17 @@ typedef struct _LAUNCH_DATA_PAGE
 #define LDT_LAUNCH_DASHBOARD_REASON_FORCE_ACCOUNT_NAME_CHANGE 11
 #define LDT_LAUNCH_DASHBOARD_REASON_FORCE_BILLING_CHANGE      12
 
+typedef enum _KOBJECTS {
+    EventNotificationObject = 0,
+    EventSynchronizationObject = 1,
+    MutantObject = 2,
+    QueueObject = 4,
+    SemaphoreObject = 5,
+    ThreadObject = 6,
+    TimerNotificationObject = 8,
+    TimerSynchronizationObject = 9,
+} KOBJECTS;
+
 typedef struct _DISPATCHER_HEADER
 {
     UCHAR Type;
@@ -1101,6 +1114,8 @@ typedef struct _KEVENT
     DISPATCHER_HEADER Header;
 } KEVENT, *PKEVENT, *RESTRICTED_POINTER PRKEVENT;
 
+typedef ULONG KSPIN_LOCK, *PKSPIN_LOCK;
+
 typedef struct _KDEVICE_QUEUE_ENTRY
 {
     LIST_ENTRY DeviceListEntry;
@@ -1237,12 +1252,28 @@ typedef NTSTATUS (NTAPI *PDRIVER_DISPATCH) (
     IN struct _IRP *Irp
 );
 
+#define IRP_MJ_CREATE 0x00
+#define IRP_MJ_CLOSE 0x01
+#define IRP_MJ_READ 0x02
+#define IRP_MJ_WRITE 0x03
+#define IRP_MJ_QUERY_INFORMATION 0x04
+#define IRP_MJ_SET_INFORMATION 0x05
+#define IRP_MJ_FLUSH_BUFFERS 0x06
+#define IRP_MJ_QUERY_VOLUME_INFORMATION 0x07
+#define IRP_MJ_DIRECTORY_CONTROL 0x08
+#define IRP_MJ_FILE_SYSTEM_CONTROL 0x09
+#define IRP_MJ_DEVICE_CONTROL 0x0A
+#define IRP_MJ_INTERNAL_DEVICE_CONTROL 0x0B
+#define IRP_MJ_SHUTDOWN 0x0C
+#define IRP_MJ_CLEANUP 0x0D
+#define IRP_MJ_MAXIMUM_FUNCTION 0x0D
+
 typedef struct _DRIVER_OBJECT
 {
     PDRIVER_STARTIO DriverStartIo;
     PDRIVER_DELETEDEVICE DriverDeleteDevice;
     PDRIVER_DISMOUNTVOLUME DriverDismountVolume;
-    PDRIVER_DISPATCH MajorFunction[0x0E];
+    PDRIVER_DISPATCH MajorFunction[IRP_MJ_MAXIMUM_FUNCTION + 1];
 } DRIVER_OBJECT, *PDRIVER_OBJECT;
 
 typedef struct _DEVICE_OBJECT
@@ -4215,6 +4246,16 @@ XBAPI PFN_COUNT NTAPI FscGetCacheSize (void);
 XBAPI OBJECT_TYPE ExTimerObjectType;
 XBAPI OBJECT_TYPE ExSemaphoreObjectType;
 
+/* Registry value types */
+#define REG_NONE 0
+#define REG_SZ 1
+#define REG_EXPAND_SZ 2
+#define REG_BINARY 3
+#define REG_DWORD 4
+#define REG_DWORD_LITTLE_ENDIAN 4
+#define REG_DWORD_BIG_ENDIAN 5
+#define REG_MULTI_SZ 7
+
 /* Offsets for ExSaveNonVolatileSetting / ExQueryNonVolatileSetting */
 #define XC_TIMEZONE_BIAS                  0x0000
 #define XC_TZ_STD_NAME                    0x0001
@@ -4303,7 +4344,8 @@ XBAPI OBJECT_TYPE ExMutantObjectType;
 XBAPI LARGE_INTEGER NTAPI ExInterlockedAddLargeInteger
 (
     IN OUT PLARGE_INTEGER Addend,
-    IN LARGE_INTEGER Increment
+    IN LARGE_INTEGER Increment,
+    IN OUT PKSPIN_LOCK Lock
 );
 
 XBAPI VOID NTAPI ExInitializeReadWriteLock
