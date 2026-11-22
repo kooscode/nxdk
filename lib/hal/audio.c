@@ -211,10 +211,13 @@ void XAudioInit(int sampleSizeInBits, int numChannels, XAudioCallback callback, 
 
 	// power up all codec sections and set master and PCM out volume to 0 dB
 	// (unmuted): after a cold reset, codecs that implement these registers
-	// start muted
-	ac97WriteCodec(0x26, 0x0000);
-	ac97WriteCodec(0x02, 0x0000);
-	ac97WriteCodec(0x18, 0x0808);
+	// start muted. Only when the codec came up: a codec register access
+	// without a running AC-link can hang the console.
+	if (pac97device->mmio[0x130>>2] & 0x100) {
+		ac97WriteCodec(0x26, 0x0000);
+		ac97WriteCodec(0x02, 0x0000);
+		ac97WriteCodec(0x18, 0x0808);
+	}
 
 	// reset bus master registers for analog output
 	pb[0x11B] = (1 << 4) | (1 << 3) | (1 << 2) | (1 << 1);
