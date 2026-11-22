@@ -42,8 +42,10 @@ static bool digitalDrained;
 static KINTERRUPT InterruptObject;
 static KDPC DPCObject;
 
-// global reference to the ac97 device
-AC97_DEVICE ac97Device;
+// global reference to the ac97 device. Page-aligned: the DMA engines read the
+// descriptor lists by physical address, so a list must not cross a page
+// boundary (the next virtual page is usually not the next physical one).
+AC97_DEVICE ac97Device __attribute__((aligned(4096)));
 
 
 //DPCs avoid crashes inside non reentrant user callbacks called by nested ISRs.
@@ -143,7 +145,7 @@ static void ac97WriteCodec(unsigned int reg, unsigned short value)
 
 	for (int i = 0; i < 1000; i++) {
 		if (!(pb[0x134] & 1)) {
-			*(volatile unsigned short *)(pb + reg) = value;
+			*(volatile unsigned short *)&pb[reg] = value;
 			return;
 		}
 		KeStallExecutionProcessor(20);
