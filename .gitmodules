@@ -11,11 +11,12 @@
 	url = https://github.com/XboxDev/extract-xiso.git
 [submodule "lib/net/lwip"]
 	path = lib/net/lwip
-	url = https://github.com/lwip-tcpip/lwip.git
+	url = https://github.com/kooscode/lwip.git
+	branch = oxos
 [submodule "lib/sdl/SDL2"]
 	path = lib/sdl/SDL2
-	url = https://github.com/XboxDev/nxdk-sdl.git
-	branch = nxdk
+	url = https://github.com/kooscode/nxdk-sdl.git
+	branch = oxos
 [submodule "lib/pdclib"]
 	path = lib/pdclib
 	url = https://github.com/kooscode/nxdk-pdclib.git
