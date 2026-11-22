@@ -51,6 +51,7 @@
 static unsigned char*	framebufferMemory = NULL;
 static unsigned char*	_fb = NULL;
 static DWORD			dwEncoderSettings 	= 0;
+static DWORD			dwCurrentAvMode = 0;
 static VIDEO_MODE		vmCurrent = { 0, 0, 0, 0 };
 static int			flickerLevel		= 5;
 static BOOL			flickerSet		= FALSE;
@@ -317,6 +318,11 @@ VIDEO_MODE XVideoGetMode(void)
 	return vmCurrent;
 }
 
+DWORD XVideoGetAvMode(void)
+{
+	return dwCurrentAvMode;
+}
+
 void XVideoFlushFB(void)
 {
 	asm __volatile__("sfence");
@@ -346,6 +352,8 @@ void XVideoInit(DWORD dwMode, int width, int height, int bpp)
 		assert(false);
 		break;
 	}
+
+	dwCurrentAvMode = dwMode;
 
 	XVideoSetVideoEnable(FALSE);
 

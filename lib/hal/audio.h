@@ -45,6 +45,8 @@ typedef struct
 // are provided to cope with future enhancements. Currently supported samples
 // are 16 bit, 2 channels (stereo)
 void XAudioInit(int sampleSizeInBits, int numChannels, XAudioCallback callback, void *data);
+void XAudioShutdown(void); // stop DMA, clear descriptor bases, disconnect the IRQ (before launching a title)
+void XAudioResync(void);   // recover an engine that ran past LVI; leaves it stopped
 void XAudioPlay(void);
 void XAudioPause(void);
 void XAudioProvideSamples(unsigned char *buffer, unsigned short bufferLength, int isFinal);

@@ -41,6 +41,7 @@ static bool digitalDrained;
 
 static KINTERRUPT InterruptObject;
 static KDPC DPCObject;
+static bool interruptConnected = false;
 
 // global reference to the ac97 device. Page-aligned: the DMA engines read the
 // descriptor lists by physical address, so a list must not cross a page
@@ -77,48 +78,34 @@ static BOOLEAN __stdcall ISR(PKINTERRUPT Interrupt, PVOID ServiceContext)
 	unsigned char analogInterrupt = pb[0x116];
 	unsigned char digitalInterrupt = pb[0x176];
 
-	bool waitCompleted = false;
+	bool bufferCompleted = false;
 
+	// The S/PDIF engine spools the same buffers as PCM out, so PCM out alone
+	// paces the callback. Every completed buffer (BCIS, or LVBCI when the
+	// chip has run dry) asks for one refill. Gating this on the two engines
+	// being in step, or on a "drained" flag, lost the wakeup for good after
+	// an underrun or a refill that landed between the two engines'
+	// interrupts; the chip then replayed its last buffer forever.
 	if (analogInterrupt) {
-		bool waitingForAnalog = (analogBufferCount > digitalBufferCount);
-
-		// Was the interrupt triggered because we were out of data?
-		if ((analogInterrupt & 8) && !analogDrained) {
-			if (analogBufferCount > 0) {
-				waitCompleted |= waitingForAnalog;
+		if (analogInterrupt & (8 | 4)) {
+			if (analogBufferCount > 0)
 				analogBufferCount--;
-			}
+			bufferCompleted = true;
 		}
-
 		analogDrained = analogInterrupt & 4;
-
 		pb[0x116]=0xFF; // clear all int sources
 	}
 
 	if (digitalInterrupt) {
-		bool waitingForDigital = (digitalBufferCount > analogBufferCount);
-
-		// Was the interrupt triggered because we were out of data?
-		if ((digitalInterrupt & 8) && !digitalDrained) {
-			if (digitalBufferCount > 0) {
-				waitCompleted |= waitingForDigital;
-				digitalBufferCount--;
-			}
-		}
-
+		if ((digitalInterrupt & (8 | 4)) && digitalBufferCount > 0)
+			digitalBufferCount--;
 		digitalDrained = digitalInterrupt & 4;
-
 		pb[0x176]=0xFF; // clear all int sources
 	}
 
-
-	// If a buffer was consumed by analog and digital output, we ask for a DPC
-	if (waitCompleted) {
+	if (bufferCompleted) {
 		//KeInsertQueueDpc queues Dpc and returns TRUE if Dpc not already queued.
-		//Dpc will be queued only once. So only one Dpc is fired after ISRs cease fire.
-		//DPCs avoid crashes inside non reentrant user callbacks called by nested ISRs.
 		//CAUTION : if you use fpu in DPC you have to save & restore yourself fpu state!!!
-		//(fpu=floating point unit, i.e the coprocessor executing floating point opcodes)
 		KeInsertQueueDpc(&DPCObject,NULL,NULL); //calls user callback soon
 	}
 
@@ -165,6 +152,13 @@ void XAudioInit(int sampleSizeInBits, int numChannels, XAudioCallback callback, 
 	AC97_DEVICE * pac97device = &ac97Device;
 	KIRQL irql;
 	ULONG vector;
+
+	// Re-init (SDL does this on close): drop the old ISR before re-initialising it.
+	if (interruptConnected) {
+		KeDisconnectInterrupt(&InterruptObject);
+		KeRemoveQueueDpc(&DPCObject);
+		interruptConnected = false;
+	}
 
 	// Hack to prevent an assertion in MmGetPhysicalAddress by locking the memory.
 	// A future API redesign should use proper allocation
@@ -266,7 +260,89 @@ void XAudioInit(int sampleSizeInBits, int numChannels, XAudioCallback callback, 
 				LevelSensitive,
 				FALSE);
 	
-	KeConnectInterrupt(&InterruptObject);
+	interruptConnected = KeConnectInterrupt(&InterruptObject);
+}
+
+// Recover an engine that ran past its last valid descriptor: stop and reset
+// both bus masters, clear their status, empty the descriptor lists and point
+// the chip at them again. On an underrun the MCPX does not halt at LVI; it
+// keeps lapping stale descriptors. Leaves the engines stopped; queue samples
+// with XAudioProvideSamples, then call XAudioPlay.
+void XAudioResync(void)
+{
+	AC97_DEVICE *pac97device = &ac97Device;
+	volatile unsigned char *pb = (unsigned char *)pac97device->mmio;
+
+	if (!pb) return;
+	pb[0x11B] = 0;
+	pb[0x17B] = 0;
+	pb[0x11B] = (1 << 1);
+	for (int i = 0; i < 1000 && (pb[0x11B] & (1 << 1)); i++)
+		KeStallExecutionProcessor(1);
+	pb[0x17B] = (1 << 1);
+	for (int i = 0; i < 1000 && (pb[0x17B] & (1 << 1)); i++)
+		KeStallExecutionProcessor(1);
+	pb[0x116] = 0xFF;
+	pb[0x176] = 0xFF;
+
+	for (unsigned int i = 0; i < 32; i++) {
+		pac97device->pcmOutDescriptor[i].bufferStartAddress = 0;
+		pac97device->pcmOutDescriptor[i].bufferLengthInSamples = 0;
+		pac97device->pcmOutDescriptor[i].bufferControl = 0;
+		pac97device->pcmSpdifDescriptor[i].bufferStartAddress = 0;
+		pac97device->pcmSpdifDescriptor[i].bufferLengthInSamples = 0;
+		pac97device->pcmSpdifDescriptor[i].bufferControl = 0;
+	}
+	__asm__ __volatile__("" ::: "memory");
+	pac97device->mmio[0x110>>2] = MmGetPhysicalAddress((void *)&pac97device->pcmOutDescriptor[0]);
+	pac97device->mmio[0x170>>2] = MmGetPhysicalAddress((void *)&pac97device->pcmSpdifDescriptor[0]);
+	pac97device->nextDescriptor = 0;
+	analogBufferCount = 0;
+	digitalBufferCount = 0;
+	analogDrained = false;
+	digitalDrained = false;
+	pb[0x11B] = 0x1c; // stopped, interrupts enabled (as XAudioPause)
+	pb[0x17B] = 0x1c;
+}
+
+// Stop audio before handing the console to another title. HalQuickReboot does
+// not reset the MCPX: a completion IRQ afterwards would jump into this
+// title's (now unmapped) ISR, and the descriptor bases would point into
+// whatever loads over ac97Device.
+void XAudioShutdown(void)
+{
+	AC97_DEVICE *pac97device = &ac97Device;
+	volatile unsigned char *pb = (unsigned char *)pac97device->mmio;
+
+	if (!pb) return;
+	pac97device->callback = NULL;
+
+	// Reset the bus masters (RR only: no interrupt enables while the ISR is
+	// still connected), bounded so a codec that never acks cannot hang.
+	pb[0x11B] = (1 << 1);
+	for (int i = 0; i < 100000 && (pb[0x11B] & (1 << 1)); i++)
+		KeStallExecutionProcessor(1);
+	pb[0x17B] = (1 << 1);
+	for (int i = 0; i < 100000 && (pb[0x17B] & (1 << 1)); i++)
+		KeStallExecutionProcessor(1);
+
+	// Stopped and status cleared before the descriptor bases go away.
+	pb[0x116] = 0xFF;
+	pb[0x176] = 0xFF;
+	pb[0x11B] = 0;
+	pb[0x17B] = 0;
+	pac97device->mmio[0x110>>2] = 0;
+	pac97device->mmio[0x170>>2] = 0;
+
+	if (interruptConnected) {
+		KeDisconnectInterrupt(&InterruptObject);
+		KeRemoveQueueDpc(&DPCObject);
+		interruptConnected = false;
+	}
+	analogBufferCount = 0;
+	digitalBufferCount = 0;
+	analogDrained = false;
+	digitalDrained = false;
 }
 
 // tell the chip it is OK to play...
@@ -307,12 +383,14 @@ void XAudioProvideSamples(unsigned char *buffer, unsigned short bufferLength, in
 	pac97device->pcmOutDescriptor[pac97device->nextDescriptor].bufferStartAddress    = address;
 	pac97device->pcmOutDescriptor[pac97device->nextDescriptor].bufferLengthInSamples = wordCount;
 	pac97device->pcmOutDescriptor[pac97device->nextDescriptor].bufferControl         = bufferControl;
+	__asm__ __volatile__("" ::: "memory"); // descriptor before LVI (-O2)
 	pb[0x115] = pac97device->nextDescriptor; // set last active descriptor
 	analogBufferCount++;
 
 	pac97device->pcmSpdifDescriptor[pac97device->nextDescriptor].bufferStartAddress    = address;
 	pac97device->pcmSpdifDescriptor[pac97device->nextDescriptor].bufferLengthInSamples = wordCount;
 	pac97device->pcmSpdifDescriptor[pac97device->nextDescriptor].bufferControl         = bufferControl;
+	__asm__ __volatile__("" ::: "memory"); // descriptor before LVI (-O2)
 	pb[0x175] = pac97device->nextDescriptor; // set last active descriptor
 	digitalBufferCount++;
 

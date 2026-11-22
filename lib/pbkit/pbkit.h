@@ -60,12 +60,19 @@ void    pb_extra_buffers(int n);//requests additional back buffers (default is 0
 void    pb_size(DWORD size);    //sets push buffer size (default is 512Kb) (call it before pb_init)
 int     pb_init(void);      //returns 0 if everything went well (starts Dma engine)
 void    pb_kill(void);      //stops Dma engine and releases push buffer
+/* Drop the GPU IRQ and the Hal shutdown hook without waiting for the
+ * graphics engine. pb_kill waits until PGRAPH reports idle and the pending
+ * flip completes; xemu never does either. HalQuickReboot runs pb_kill as a
+ * shutdown hook if it is still registered, so skipping pb_kill alone is not
+ * enough. */
+void    pb_disconnect_irq(void);
 
 void    pb_target_extra_buffer(int n);  //to have rendering made into a static extra buffer
 void    pb_target_back_buffer(void);    //to have rendering made into normal rotating back buffer
 
 DWORD   *pb_extra_buffer(int n);    //returns a static extra buffer address
 DWORD   *pb_back_buffer(void);      //returns normal rotating back buffer address
+DWORD   *pb_front_buffer(void);     //returns the frame buffer currently scanned out (NULL if unknown)
 DWORD   pb_back_buffer_width(void);
 DWORD   pb_back_buffer_height(void);
 DWORD   pb_back_buffer_pitch(void);

@@ -470,7 +470,16 @@ void nvnetdrv_stop (void)
 {
     assert(g_running);
 
+    /* The ISR drops the mask and queues a DPC that turns it back on.
+     * Disconnecting first left that DPC re-arming the NIC with no handler,
+     * so the next title took an IRQ into unmapped code and lost video. */
+    __asm__ __volatile__("cli" ::: "memory");
+    nvnetdrv_irq_disable();
+    reg32(NvRegIrqStatus) = NVREG_IRQ_MASK;
     KeDisconnectInterrupt(&g_interrupt);
+    KeRemoveQueueDpc(&g_dpcObj);
+    nvnetdrv_irq_disable();
+    __asm__ __volatile__("sti" ::: "memory");
 
     // Stop NIC processing rings
     nvnetdrv_stop_txrx();
@@ -493,6 +502,8 @@ void nvnetdrv_stop (void)
     reg32(NvRegTxRxControl) = NVREG_TXRXCTL_DISABLE | NVREG_TXRXCTL_RESET;
     KeDelayExecutionThread(KernelMode, FALSE, TEN_MICRO);
     reg32(NvRegTxRxControl) = NVREG_TXRXCTL_DISABLE;
+    nvnetdrv_irq_disable();
+    reg32(NvRegIrqStatus) = NVREG_IRQ_MASK;
 
     // Free all memory allocated by nvnetdrv
     MmFreeContiguousMemory((void *)g_rxRing);

@@ -1594,6 +1594,20 @@ DWORD pb_back_buffer_pitch(void)
     return pb_FrameBuffersPitch;
 }
 
+DWORD *pb_front_buffer(void)
+{
+    int i;
+    DWORD scanout;
+
+    // pb_front_index is only set at init; the flips go through PCRTC_START,
+    // so look up which frame buffer the CRTC is actually showing.
+    if (!pb_running) return NULL;
+    scanout=VIDEOREG(PCRTC_START)&0x03FFFFFF;
+    for(i=0;i<3;i++)
+        if (pb_FBAddr[i] && (pb_FBAddr[i]&0x03FFFFFF)==scanout) return (DWORD *)pb_FBAddr[i];
+    return NULL;
+}
+
 DWORD *pb_back_buffer(void)
 {
     return (DWORD *)pb_FBAddr[pb_back_index];
@@ -2037,6 +2051,21 @@ int pb_finished(void)
 
 
 
+void pb_disconnect_irq(void)
+{
+    // No wait: pb_wait_until_gr_not_busy and the back-buffer flip both spin
+    // forever on xemu.
+    __asm__ __volatile__("cli" ::: "memory");
+    VIDEOREG(PCRTC_INTR)=PCRTC_INTR_VBLANK_RESET;
+    VIDEOREG(PCRTC_INTR_EN)=PCRTC_INTR_EN_VBLANK_DISABLED;
+    VIDEOREG(NV_PMC_INTR_EN_0)=NV_PMC_INTR_EN_0_INTA_DISABLED;
+    pb_running=0;
+    pb_uninstall_gpu_interrupt();
+    KeRemoveQueueDpc(&pb_DPCObject);
+    HalRegisterShutdownNotification(&pb_shutdown_registration, FALSE);
+    __asm__ __volatile__("sti" ::: "memory");
+}
+
 void pb_kill(void)
 {
     void            *pSavedData;
@@ -2170,7 +2199,11 @@ void pb_kill(void)
     VIDEOREG(NV_PFB_CFG0)=pb_OldFBConfig0;
     VIDEOREG(NV_PFB_CFG1)=pb_OldFBConfig1;
     VIDEOREG(NV_PMC_ENABLE)=pb_OldMCEnable;
-    VIDEOREG(NV_PMC_INTR_EN_0)=pb_OldMCInterrupt;
+    /* The GPU ISR is already disconnected. Restoring the old INTA enable
+     * left vblank asserted into the next title. */
+    VIDEOREG(PCRTC_INTR)=PCRTC_INTR_VBLANK_RESET;
+    VIDEOREG(PCRTC_INTR_EN)=PCRTC_INTR_EN_VBLANK_DISABLED;
+    VIDEOREG(NV_PMC_INTR_EN_0)=NV_PMC_INTR_EN_0_INTA_DISABLED;
     VIDEOREG(PCRTC_START)=pb_OldVideoStart;
 
     NtClose(pb_VBlankEvent);

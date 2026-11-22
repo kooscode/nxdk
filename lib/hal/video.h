@@ -70,6 +70,7 @@ DWORD XVideoGetEncoderSettings(void);
 unsigned char* XVideoGetFB(void);
 void XVideoSetFB(unsigned char *fb);
 VIDEO_MODE XVideoGetMode(void);
+DWORD XVideoGetAvMode(void); // AV mode last passed to AvSetDisplayMode by XVideoInit (0 if none)
 void XVideoFlushFB(void);
 
 void XVideoSetFlickerFilter(int level);
