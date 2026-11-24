@@ -139,6 +139,30 @@ static void ac97WriteCodec(unsigned int reg, unsigned short value)
 	}
 }
 
+// Reads a codec (mixer) register under the same semaphore. Returns false when
+// the semaphore never frees or the codec does not answer (GLOB_STA bit 15,
+// read completion status, set by the controller on a read timeout).
+static bool ac97ReadCodec(unsigned int reg, unsigned short *value)
+{
+	AC97_DEVICE *pac97device = &ac97Device;
+	volatile unsigned char *pb = (unsigned char *)pac97device->mmio;
+
+	for (int i = 0; i < 1000; i++) {
+		if (!(pb[0x134] & 1)) {
+			pac97device->mmio[0x130>>2] = 0x8000; // clear a stale timeout
+			unsigned short v = *(volatile unsigned short *)&pb[reg];
+			if (pac97device->mmio[0x130>>2] & 0x8000) {
+				pac97device->mmio[0x130>>2] = 0x8000;
+				return false;
+			}
+			*value = v;
+			return true;
+		}
+		KeStallExecutionProcessor(20);
+	}
+	return false;
+}
+
 // Initialises the audio subsystem.  This *must* be done before
 // audio will work.  You can pass NULL as the callback, but if you
 // do that, it is your responsibility to keep feeding the data to
@@ -209,10 +233,18 @@ void XAudioInit(int sampleSizeInBits, int numChannels, XAudioCallback callback, 
 	// (unmuted): after a cold reset, codecs that implement these registers
 	// start muted. Only when the codec came up: a codec register access
 	// without a running AC-link can hang the console.
+	// Only change what the codec reports as off: a codec the kernel or the
+	// last title already set up is left exactly as it is (blind writes here
+	// gave static on some console revisions), and one that came out of reset
+	// muted or powered down still gets switched on.
 	if (pac97device->mmio[0x130>>2] & 0x100) {
-		ac97WriteCodec(0x26, 0x0000);
-		ac97WriteCodec(0x02, 0x0000);
-		ac97WriteCodec(0x18, 0x0808);
+		unsigned short v;
+		if (ac97ReadCodec(0x26, &v) && (v & 0x7F00))   // PR0-PR6 power-down bits
+			ac97WriteCodec(0x26, v & ~0x7F00);         // keep EAPD as it was
+		if (ac97ReadCodec(0x02, &v) && (v & 0x8000))   // master muted
+			ac97WriteCodec(0x02, 0x0000);
+		if (ac97ReadCodec(0x18, &v) && (v & 0x8000))   // PCM out muted
+			ac97WriteCodec(0x18, 0x0808);
 	}
 
 	// reset bus master registers for analog output
