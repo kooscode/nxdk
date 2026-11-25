@@ -47,6 +47,9 @@ typedef struct
 void XAudioInit(int sampleSizeInBits, int numChannels, XAudioCallback callback, void *data);
 void XAudioShutdown(void); // stop DMA, clear descriptor bases, disconnect the IRQ (before launching a title)
 void XAudioResync(void);   // recover an engine that ran past LVI; leaves it stopped
+// Feature tests for code that also builds against nxdk versions without them.
+#define XAUDIO_HAVE_SHUTDOWN 1
+#define XAUDIO_HAVE_RESYNC 1
 void XAudioPlay(void);
 void XAudioPause(void);
 void XAudioProvideSamples(unsigned char *buffer, unsigned short bufferLength, int isFinal);
